@@ -1,0 +1,102 @@
+---
+title: "CourseProject"
+author: "YuWang"
+date: "2017/8/20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Load and Clean Data
+First we load the data from the csv files. Then we take a look at the data and try to extract possibly useful features.
+
+```{r, echo = FALSE, eval = FALSE}
+
+```
+
+```{r}
+oriData <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+testfinal <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+```
+
+It seems that the first several columns have no impact on the classe variable, so we can remove these variables.
+```{r}
+oriData[, 1:7] <- NULL
+```
+
+Also we can find that some of the features are mostly blanks/NAs or have nearly zero variance, so we also remove these features. 
+```{r}
+library(caret)
+library(gbm)
+nzv <- nearZeroVar(oriData, saveMetrics=TRUE)
+oriData <- oriData[,nzv$nzv==FALSE]
+
+isNACnt <- sapply(oriData, function(x) sum(is.na(x)))
+oriData[, isNACnt > dim(oriData)[1] * 0.7] <- NULL
+```
+
+Then we separate the original data into training set, testing set and cross validation set.
+```{r}
+inTrain <- createDataPartition(oriData$classe, p=0.6, list=FALSE)
+myTraining <- oriData[inTrain, ]
+myTesting <- oriData[-inTrain, ]
+inTest <- createDataPartition(myTesting$classe, p=0.5, list=FALSE)
+myCV <- myTesting[-inTest, ]
+myTesting <- myTesting[inTest, ]
+```
+##Build the model
+We use the trainControl function to set options for the model. Then we try different models to see which one performs well in cross validation.
+
+### Random Forests
+```{r buildmodel}
+library(randomForest)
+set.seed(666)
+modRF <- randomForest(classe ~., data = myTraining)
+predictionRF <- predict(modRF, newdata = myTesting, type = "class")
+CMRF <- confusionMatrix(predictionRF, myTesting$classe)
+CMRF
+plot(CMRF$table, col = CMRF$byClass, main = paste("Random Forests Confusion Matrix: Accuracy = ", round(CMRF$overall['Accuracy'], 4)))
+```
+
+### Decision Trees
+```{r}
+library(rpart)
+set.seed(666)
+modDT <- rpart(classe ~ ., data = myTraining, method = "class")
+predictionDT <- predict(modDT, newdata = myTesting, type = "class")
+CMDT <- confusionMatrix(predictionDT, myTesting$classe)
+CMDT
+
+plot(CMDT$table, col = CMDT$byClass, main = paste("Decision Tree Confusion Matrix: Accuracy = ", round(CMDT$overall['Accuracy'], 4)))
+```
+
+### Generalized Boosted Regression
+```{r}
+set.seed(666)
+modGBM <- train(classe ~ ., data = myTraining, method = "gbm",
+             trControl = trainControl(method = "repeatedcv", number = 5, repeats = 1), 
+             verbose = FALSE)
+predictionGBM <- predict(modGBM, newdata = myTesting)
+CMGBM <- confusionMatrix(predictionGBM, myTesting$classe)
+CMGBM
+plot(CMGBM$table, col = CMGBM$byClass, main = paste("Generalize Boosted Regression Confusion Matrix: Accuracy = ", round(CMGBM$overall['Accuracy'], 4)))
+```
+
+## Estimate Out-of-Sample Error
+From above we can see that the accuracy of random forests model is higher than both of decision trees and generalized boosted regression model. Thus we will choose the random forests model to make predictions and use the cross validation dataset to estimate out-of-sample error.
+```{r}
+predictionCV <- predict(modRF, newdata = myCV, type = "class")
+CMCV <- confusionMatrix(predictionCV, myCV$classe)
+CMCV
+OSerror <- as.numeric(1 - CMCV$overall[1])
+```
+The estimated out-of-sample error is `r OSerror`.
+
+## Prediction on 20 test cases
+We will use the random forests model to predict the 20 test cases.
+```{r}
+predictionFinal <- predict(modRF, newdata = testfinal, type = "class")
+predictionFinal
+```
